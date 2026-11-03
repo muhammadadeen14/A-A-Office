@@ -1,5 +1,6 @@
 import { afterEach, describe, expect, it } from 'vitest'
-import { mkdtempSync, mkdirSync, realpathSync, rmSync, symlinkSync, writeFileSync } from 'node:fs'
+import { mkdtempSync, mkdirSync, rmSync, symlinkSync, writeFileSync } from 'node:fs'
+import { realpath } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { PathGuard } from '../src/main/security/pathGuard'
@@ -24,7 +25,7 @@ describe('security boundaries', () => {
     const nested = join(root,'Client Files','分析',...'x'.repeat(20).match(/.{1,20}/g)!)
     mkdirSync(nested,{ recursive:true }); const file = join(nested,'résumé.txt'); writeFileSync(file,'safe')
     const guard = new PathGuard([root])
-    await expect(guard.resolveExisting(file)).resolves.toBe(realpathSync(file))
+    await expect(guard.resolveExisting(file)).resolves.toBe(await realpath(file))
     await expect(guard.resolveExisting('missing.txt')).rejects.toMatchObject({ code:'ENOENT' })
   })
 
@@ -83,7 +84,7 @@ describe('security boundaries', () => {
   it('cancels an active approved command and records failed execution', async () => {
     const root = mkdtempSync(join(tmpdir(),'aa-cancel-')); directories.push(root); const database = new OfficeDatabase(':memory:'); const agent = database.listAgents()[0]!
     const tools = new ToolRegistry(database,new PathGuard([root]))
-    const executable = process.platform === 'win32' ? 'cmd.exe' : '/bin/sleep'; const args = process.platform === 'win32' ? ['/d','/s','/c','ping -n 10 127.0.0.1 > nul'] : ['10']
+    const executable = process.execPath; const args = ['-e','setTimeout(() => {}, 10000)']
     const request = await tools.request(agent,null,{ name:'system.execute', input:{ executable,args,cwd:root } }); const approved = database.decideApproval(request.approval!.id,'approved')
     const execution = tools.executeApproved(approved.id); await new Promise((resolve) => setTimeout(resolve,20)); tools.abortActive()
     await expect(execution).rejects.toThrow('stopped'); expect(database.getApproval(approved.id)?.executionStatus).toBe('failed'); database.close()
