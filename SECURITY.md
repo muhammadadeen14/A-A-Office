@@ -11,6 +11,7 @@ The model proposes and reasons. The application decides whether anything execute
 - strict IPC schemas with Zod
 - Content Security Policy applied to renderer responses
 - arbitrary navigation and new windows denied
+- embedded webviews and Chromium permission requests denied
 
 ## Credentials
 
@@ -24,9 +25,12 @@ Research-only agents cannot write files or run commands. Standard agents may cre
 
 Approved process execution uses an executable and argument array with `execFile`; it does not concatenate a model-generated shell string. Execution has a timeout and output limit.
 
+Approval decisions and execution are separate persisted states. The backend atomically claims an approved action once, rejects replay, executes the stored payload rather than mutable caller arguments, and records completion or failure. STOP ALL aborts active commands and prevents new tool calls or approvals from executing.
+
 ## Path safety
 
 Paths are resolved canonically against application-managed workspace and export roots. Relative traversal and prefix-lookalike paths are rejected. The design supports spaces, Unicode, alternate drives, and long paths because it uses platform path APIs and argument arrays.
+Existing files and write ancestors are checked through `realpath`; symbolic-link escapes and writes through a final symlink are rejected.
 
 ## Emergency stop
 

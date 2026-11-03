@@ -8,4 +8,4 @@
 6. Code-sign the executable with the release certificate. Signing credentials must live in the CI secret store, never the repository.
 7. Generate checksums, publish the installer and checksum, and record known limitations.
 
-Version `0.1.0` is not code-signed. `signAndEditExecutable` is disabled for reproducible unsigned cross-builds; enable it in the signed release job when signing credentials and a Windows runner are configured.
+Version `0.1.0` is not code-signed. `signAndEditExecutable` is disabled only for Linux cross-build diagnosis; the Windows workflow enables executable metadata editing. Add certificate secrets to that Windows job before public distribution.

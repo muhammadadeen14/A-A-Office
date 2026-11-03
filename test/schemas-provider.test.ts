@@ -29,4 +29,12 @@ describe('provider isolation', () => {
     await expect(request).rejects.toThrow('503')
     await expect(request).rejects.not.toThrow('top-secret-key')
   })
+
+  it('bounds stalled provider requests with a user-facing timeout', async () => {
+    vi.stubGlobal('fetch', vi.fn((_url: string | URL | Request, init?: RequestInit) => new Promise((_resolve,reject) => {
+      init?.signal?.addEventListener('abort',() => reject(new DOMException('aborted','AbortError')),{ once:true })
+    })))
+    const service = new ProviderService(5)
+    await expect(service.complete({ id:'1', name:'Test', type:'compatible', baseUrl:'https://example.com/v1', model:'model', hasCredential:true, enabled:true }, 'secret', [{ role:'user', content:'hello' }])).rejects.toThrow('timed out')
+  })
 })

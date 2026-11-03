@@ -15,10 +15,11 @@
     "test": "vitest run",
     "test:watch": "vitest",
     "dist": "npm run build && electron-builder",
-    "dist:win": "npm run build && electron-builder --win nsis --x64"
+    "dist:win": "npm run build && electron-builder --win nsis --x64",
+    "dist:win:release": "npm run build && electron-builder --win nsis --x64 -c.win.signAndEditExecutable=true"
   },
   "dependencies": {
-    "better-sqlite3": "^12.4.1",
+    "better-sqlite3": "13.0.3",
     "electron-log": "^5.4.3",
     "lucide-react": "^0.468.0",
     "react": "^18.3.1",
@@ -26,22 +27,22 @@
     "zod": "^4.6.7"
   },
   "devDependencies": {
-    "@eslint/js": "^9.17.0",
-    "@types/better-sqlite3": "^7.6.12",
+    "@eslint/js": "^10.0.1",
+    "@types/better-sqlite3": "9.6.0",
     "@types/node": "^22.10.2",
     "@types/react": "^18.3.18",
     "@types/react-dom": "^18.3.5",
-    "@vitejs/plugin-react": "^4.3.4",
-    "electron": "^33.3.1",
-    "electron-builder": "^25.1.8",
-    "electron-vite": "^2.3.0",
-    "eslint": "^9.17.0",
-    "eslint-plugin-react-hooks": "^5.1.0",
-    "eslint-plugin-react-refresh": "^0.4.16",
+    "@vitejs/plugin-react": "^6.2.1",
+    "electron": "^45.2.1",
+    "electron-builder": "^26.18.0",
+    "electron-vite": "^6.0.0",
+    "eslint": "^10.14.0",
+    "eslint-plugin-react-hooks": "^7.1.1",
+    "eslint-plugin-react-refresh": "^0.5.7",
     "typescript": "^5.7.2",
     "typescript-eslint": "^8.18.2",
-    "vite": "^5.4.11",
-    "vitest": "^2.1.8"
+    "vite": "^8.3.5",
+    "vitest": "^5.1.0"
   },
   "build": {
     "appId": "com.aaoffice.desktop",
@@ -59,10 +60,14 @@
     ],
     "win": {
       "signAndEditExecutable": false,
+      "icon": "build/icon.ico",
+      "executableName": "A&A Office",
       "target": [
         {
           "target": "nsis",
-          "arch": ["x64"]
+          "arch": [
+            "x64"
+          ]
         }
       ],
       "requestedExecutionLevel": "asInvoker"
@@ -74,6 +79,8 @@
       "createStartMenuShortcut": true,
       "runAfterFinish": true,
       "deleteAppDataOnUninstall": false,
+      "installerIcon": "build/icon.ico",
+      "uninstallerIcon": "build/icon.ico",
       "shortcutName": "A&A Office"
     }
   }

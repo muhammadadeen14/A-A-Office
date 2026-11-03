@@ -17,11 +17,16 @@ The Vitest suite covers:
 - agent creation, editing, archival, and protected defaults
 - task creation, assignment, legal transitions, parent/child relations, and retry
 - approval creation, one-time decisions, denial enforcement, and approved execution
+- approval replay prevention, immutable approved arguments, command cancellation, and exit capture
 - permission-profile enforcement
 - trusted paths and traversal rejection
+- spaces, Unicode, long paths, missing files, and symbolic-link escape rejection
 - memory indexing, search, and deletion
 - provider failure isolation and credential redaction
 - restart persistence and interrupted-task recovery
+- bounded Office Manager delegation, duplicate-task prevention, and provider concurrency
+- live backup, integrity validation, restore, and corrupted-backup rejection
+- Windows package metadata and repeatable artifact workflow
 
 The compiler checks both Electron and renderer contracts. ESLint checks TypeScript and React hooks. The production build compiles the main, preload, and renderer bundles.
 

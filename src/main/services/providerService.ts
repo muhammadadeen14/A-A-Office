@@ -4,17 +4,25 @@ export interface ChatMessage { role: 'system' | 'user' | 'assistant'; content: s
 export interface ProviderResponse { content: string; model: string; inputTokens?: number; outputTokens?: number }
 
 export class ProviderService {
+  constructor(private readonly requestTimeoutMs = 120_000) {}
+
   async complete(config: ProviderConfig, apiKey: string, messages: ChatMessage[], signal?: AbortSignal): Promise<ProviderResponse> {
     const endpoint = `${config.baseUrl.replace(/\/$/, '')}/chat/completions`
-    const response = await fetch(endpoint, {
-      method: 'POST',
-      headers: { 'content-type': 'application/json', authorization: `Bearer ${apiKey}` },
-      body: JSON.stringify({ model: config.model, messages, temperature: 0.2 }),
-      signal
-    })
+    const timeout = AbortSignal.timeout(this.requestTimeoutMs)
+    let response: Response
+    try {
+      response = await fetch(endpoint, {
+        method: 'POST',
+        headers: { 'content-type': 'application/json', authorization: `Bearer ${apiKey}` },
+        body: JSON.stringify({ model: config.model, messages, temperature: 0.2 }),
+        signal:signal ? AbortSignal.any([signal,timeout]) : timeout
+      })
+    } catch (error) {
+      if (timeout.aborted && !signal?.aborted) throw new Error('The AI provider request timed out. Check your network and provider status.', { cause:error })
+      throw error
+    }
     if (!response.ok) {
-      const detail = (await response.text()).slice(0, 500)
-      throw new Error(`Provider request failed (${response.status}): ${detail || response.statusText}`)
+      throw new Error(`The AI provider returned ${response.status} ${response.statusText || 'and could not complete the request'}. Check the credential, model, and provider status.`)
     }
     const payload = await response.json() as {
       choices?: Array<{ message?: { content?: string } }>

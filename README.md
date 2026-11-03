@@ -9,6 +9,7 @@ The product uses an original professional interface and an independent implement
 - Original professional command-center UI with dark and light themes
 - First-run setup for provider, model, and safety defaults
 - Default Office Manager plus custom specialist-agent creation
+- Bounded Office Manager planning, specialist child-task delegation, and final synthesis
 - Persistent agents, parent/child tasks, progress, results, errors, and recovery state
 - OpenAI and OpenAI-compatible provider abstraction
 - OS-encrypted credential storage through Electron `safeStorage` (DPAPI on Windows)
@@ -17,7 +18,7 @@ The product uses an original professional interface and an independent implement
 - Trusted workspace path enforcement and directory-traversal protection
 - Emergency **Stop all agents** control
 - Inspectable and removable local memory with full-text search
-- Managed files, activity audit trail, backups, and rotating logs
+- Managed files, activity audit trail, integrity-checked backup/restore, and rotating logs
 - SQLite migrations, WAL mode, transactions, indexes, and restart recovery
 - NSIS configuration for `A&A-Office-Setup.exe`
 - Windows CI workflow that tests and packages the installer
@@ -69,7 +70,7 @@ See [ARCHITECTURE.md](ARCHITECTURE.md), [SECURITY.md](SECURITY.md), [TESTING.md]
 
 ## Status
 
-Version `0.1.0` is an initial functional build. The core local workflow is implemented and tested. Browser automation, multiple provider adapters beyond the OpenAI-compatible protocol, richer agent tool calling, signed releases, and installer testing on physical Windows machines remain future work.
+Version `0.1.0` is a release candidate. The core local workflow is implemented and tested. Browser automation, provider protocols beyond OpenAI-compatible chat completions, signed releases, and installer execution on a physical Windows machine remain future work.
 
 ## License
 

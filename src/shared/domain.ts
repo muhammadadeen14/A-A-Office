@@ -7,6 +7,7 @@ export const permissionProfiles = ['research', 'standard', 'advanced', 'custom']
 export type AgentStatus = (typeof agentStatuses)[number]
 export type TaskStatus = (typeof taskStatuses)[number]
 export type ApprovalStatus = (typeof approvalStatuses)[number]
+export type ApprovalExecutionStatus = 'ready' | 'executing' | 'completed' | 'failed' | 'not_applicable'
 export type RiskLevel = (typeof riskLevels)[number]
 export type PermissionProfile = (typeof permissionProfiles)[number]
 
@@ -59,8 +60,11 @@ export interface Approval {
   payload: string
   risk: RiskLevel
   status: ApprovalStatus
+  executionStatus: ApprovalExecutionStatus
+  executionError: string | null
   createdAt: string
   decidedAt: string | null
+  executedAt: string | null
 }
 
 export interface ActivityEvent {

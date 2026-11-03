@@ -9,11 +9,12 @@ A&A Office uses three Electron layers:
 3. The React renderer presents state and sends validated requests. It has no Node.js access.
 
 `contextIsolation` and the Chromium sandbox are enabled. `nodeIntegration` is disabled. Navigation and new-window creation are blocked.
+The main process also holds a single-instance lock so a second launch cannot race the active runtime or recovery logic against the same local database.
 
 ## Core services
 
 - `OfficeDatabase` applies versioned SQLite migrations, creates the default Office Manager, stores application entities, and recovers interrupted tasks.
-- `OfficeRuntime` enforces a bounded work queue, isolates each agent request with its own abort controller, calls providers, persists results, and implements the emergency stop.
+- `OfficeRuntime` enforces bounded work and provider-call concurrency, isolates each agent request with its own abort controller, delegates bounded child tasks, persists results, and implements the emergency stop.
 - `TaskService` owns legal task state transitions and retry behavior.
 - `ProviderService` implements the OpenAI-compatible chat-completions boundary. Provider-specific code remains outside agents and tasks.
 - `PermissionService` decides whether a typed tool request is allowed, denied, or paused for approval.
@@ -32,7 +33,7 @@ Credentials are deliberately absent from this model. Provider records contain on
 
 The renderer creates a task through validated IPC. `OfficeRuntime` places it in a bounded queue and resolves its assigned agent and provider. The task moves through planning and running, while the agent moves through thinking and working. A successful answer is persisted as both task result and optional inspectable memory. A scoped provider or agent failure marks only that task and agent as failed.
 
-The current build performs direct single-agent model calls. The schema supports parent/child tasks and structured specialist assignment; a future orchestration planner can create child tasks through the same service without changing persistence or UI contracts.
+Office Manager requests a strict JSON plan, accepts only known specialist IDs, deduplicates and caps child tasks, prevents recursive manager delegation, runs work under the global provider limit, and synthesizes persisted child results. Invalid or unnecessary plans fall back to a direct manager response.
 
 ## Recovery
 

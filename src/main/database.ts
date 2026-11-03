@@ -9,8 +9,9 @@ const now = (): string => new Date().toISOString()
 
 export class OfficeDatabase {
   readonly db: Sqlite
+  private closed = false
 
-  constructor(path: string) {
+  constructor(readonly path: string) {
     if (path !== ':memory:') mkdirSync(dirname(path), { recursive: true })
     this.db = new Database(path)
     this.db.pragma('journal_mode = WAL')
@@ -20,9 +21,10 @@ export class OfficeDatabase {
   }
 
   private migrate(): void {
-    const version = this.db.pragma('user_version', { simple: true }) as number
-    if (version < 1) {
-      this.db.exec(`
+    let version = this.db.pragma('user_version', { simple: true }) as number
+    this.db.transaction(() => {
+      if (version < 1) {
+        this.db.exec(`
         CREATE TABLE agents (
           id TEXT PRIMARY KEY, name TEXT NOT NULL, role TEXT NOT NULL, description TEXT NOT NULL DEFAULT '',
           instructions TEXT NOT NULL DEFAULT '', goal TEXT NOT NULL DEFAULT '', avatar TEXT NOT NULL DEFAULT 'OA',
@@ -61,13 +63,23 @@ export class OfficeDatabase {
         CREATE INDEX tasks_status_idx ON tasks(status);
         CREATE INDEX approvals_status_idx ON approvals(status);
         CREATE INDEX activity_created_idx ON activity_events(created_at DESC);
-        PRAGMA user_version = 1;
-      `)
-    }
+        `)
+        version = 1
+      }
+      if (version < 2) {
+        this.db.exec(`
+          ALTER TABLE approvals ADD COLUMN execution_status TEXT NOT NULL DEFAULT 'not_applicable';
+          ALTER TABLE approvals ADD COLUMN execution_error TEXT;
+          ALTER TABLE approvals ADD COLUMN executed_at TEXT;
+        `)
+        version = 2
+      }
+      this.db.pragma(`user_version = ${version}`)
+    })()
   }
 
   private seed(): void {
-    const count = this.db.prepare('SELECT COUNT(*) count FROM agents').get() as { count: number }
+    const count = this.db.prepare("SELECT COUNT(*) count FROM agents WHERE name='Office Manager'").get() as { count: number }
     if (count.count === 0) {
       const timestamp = now()
       this.db.prepare(`INSERT INTO agents
@@ -83,7 +95,7 @@ export class OfficeDatabase {
     }
   }
 
-  close(): void { this.db.close() }
+  close(): void { if (!this.closed) { this.closed = true; this.db.close() } }
 
   listAgents(includeArchived = false): Agent[] {
     const rows = this.db.prepare(`SELECT * FROM agents ${includeArchived ? '' : 'WHERE archived_at IS NULL'} ORDER BY created_at`).all() as Record<string, unknown>[]
@@ -96,6 +108,7 @@ export class OfficeDatabase {
   }
 
   createAgent(input: Required<AgentInput>): Agent {
+    if (input.name.trim().toLowerCase() === 'office manager') throw new Error('Office Manager is a reserved agent name')
     const id = randomUUID(); const timestamp = now()
     this.db.prepare(`INSERT INTO agents
       (id,name,role,description,instructions,goal,avatar,color,provider,model,workspace_id,permission_profile,memory_enabled,status,current_task_id,archived_at,created_at,updated_at)
@@ -108,6 +121,8 @@ export class OfficeDatabase {
   updateAgent(id: string, changes: Partial<Agent>): Agent {
     const current = this.getAgent(id)
     if (!current) throw new Error('Agent not found')
+    if (current.name === 'Office Manager' && changes.name && changes.name !== current.name) throw new Error('Office Manager cannot be renamed')
+    if (current.name !== 'Office Manager' && changes.name?.trim().toLowerCase() === 'office manager') throw new Error('Office Manager is a reserved agent name')
     const next = { ...current, ...changes, id, updatedAt: now() }
     this.db.prepare(`UPDATE agents SET name=@name,role=@role,description=@description,instructions=@instructions,goal=@goal,
       avatar=@avatar,color=@color,provider=@provider,model=@model,workspace_id=@workspaceId,permission_profile=@permissionProfile,
@@ -124,8 +139,22 @@ export class OfficeDatabase {
     this.addActivity({ agentId: id, type: 'agent.archived', title: `${agent.name} archived`, level: 'warning' })
   }
 
-  listTasks(): Task[] {
-    return (this.db.prepare('SELECT * FROM tasks ORDER BY priority DESC, created_at DESC').all() as Record<string, unknown>[]).map(mapTask)
+  deleteAgent(id: string): void {
+    const agent = this.getAgent(id)
+    if (!agent) throw new Error('Agent not found')
+    if (agent.name === 'Office Manager') throw new Error('Office Manager cannot be deleted')
+    const references = this.db.prepare(`SELECT
+      (SELECT COUNT(*) FROM tasks WHERE assigned_agent_id=?) +
+      (SELECT COUNT(*) FROM approvals WHERE agent_id=?) +
+      (SELECT COUNT(*) FROM memories WHERE agent_id=?) +
+      (SELECT COUNT(*) FROM managed_files WHERE agent_id=?) count`).get(id, id, id, id) as { count: number }
+    if (references.count > 0) throw new Error('This agent has task or audit history. Archive it instead to preserve your records.')
+    this.db.prepare('DELETE FROM agents WHERE id=?').run(id)
+    this.addActivity({ type: 'agent.deleted', title: `${agent.name} deleted`, detail: 'Unused agent configuration removed.', level: 'warning' })
+  }
+
+  listTasks(limit = 500): Task[] {
+    return (this.db.prepare('SELECT * FROM tasks ORDER BY priority DESC, created_at DESC LIMIT ?').all(limit) as Record<string, unknown>[]).map(mapTask)
   }
 
   getTask(id: string): Task | undefined {
@@ -135,7 +164,10 @@ export class OfficeDatabase {
 
   createTask(input: Required<TaskInput>): Task {
     if (input.parentTaskId && !this.getTask(input.parentTaskId)) throw new Error('Parent task not found')
-    if (input.assignedAgentId && !this.getAgent(input.assignedAgentId)) throw new Error('Assigned agent not found')
+    if (input.assignedAgentId) {
+      const agent = this.getAgent(input.assignedAgentId)
+      if (!agent || agent.archivedAt) throw new Error('Assigned agent is unavailable')
+    }
     const id = randomUUID(); const timestamp = now()
     this.db.prepare(`INSERT INTO tasks
       (id,title,objective,assigned_agent_id,parent_task_id,status,priority,progress,result,error,created_at,started_at,completed_at,updated_at)
@@ -155,27 +187,47 @@ export class OfficeDatabase {
     return this.getTask(id)!
   }
 
-  listApprovals(): Approval[] {
-    return (this.db.prepare("SELECT * FROM approvals ORDER BY CASE status WHEN 'pending' THEN 0 ELSE 1 END, created_at DESC").all() as Record<string, unknown>[]).map(mapApproval)
+  listApprovals(limit = 500): Approval[] {
+    return (this.db.prepare("SELECT * FROM approvals ORDER BY CASE status WHEN 'pending' THEN 0 ELSE 1 END, created_at DESC LIMIT ?").all(limit) as Record<string, unknown>[]).map(mapApproval)
   }
 
-  createApproval(input: Omit<Approval, 'id' | 'status' | 'createdAt' | 'decidedAt'>): Approval {
+  getApproval(id: string): Approval | undefined {
+    const row = this.db.prepare('SELECT * FROM approvals WHERE id=?').get(id) as Record<string, unknown> | undefined
+    return row ? mapApproval(row) : undefined
+  }
+
+  createApproval(input: Omit<Approval, 'id' | 'status' | 'executionStatus' | 'executionError' | 'createdAt' | 'decidedAt' | 'executedAt'>): Approval {
     const id = randomUUID(); const createdAt = now()
     this.db.prepare(`INSERT INTO approvals (id,agent_id,task_id,action_type,description,target,reason,payload,risk,status,created_at,decided_at)
       VALUES (@id,@agentId,@taskId,@actionType,@description,@target,@reason,@payload,@risk,'pending',@createdAt,NULL)`)
       .run({ ...input, id, createdAt })
     this.addActivity({ agentId: input.agentId, taskId: input.taskId, type: 'approval.requested', title: input.description, detail: input.target, level: 'warning' })
-    return this.listApprovals().find((item) => item.id === id)!
+    return this.getApproval(id)!
   }
 
   decideApproval(id: string, status: 'approved' | 'denied'): Approval {
-    const row = this.db.prepare('SELECT * FROM approvals WHERE id = ?').get(id) as Record<string, unknown> | undefined
-    if (!row) throw new Error('Approval not found')
-    const approval = mapApproval(row)
-    if (approval.status !== 'pending') throw new Error('Approval has already been decided')
-    this.db.prepare('UPDATE approvals SET status = ?, decided_at = ? WHERE id = ?').run(status, now(), id)
-    this.addActivity({ agentId: approval.agentId, taskId: approval.taskId, type: `approval.${status}`, title: `${status === 'approved' ? 'Approved' : 'Denied'}: ${approval.description}`, detail: approval.target, level: status === 'approved' ? 'success' : 'warning' })
-    return this.listApprovals().find((item) => item.id === id)!
+    return this.db.transaction(() => {
+      const approval = this.getApproval(id)
+      if (!approval) throw new Error('Approval not found')
+      const result = this.db.prepare(`UPDATE approvals SET status=?, execution_status=?, decided_at=? WHERE id=? AND status='pending'`)
+        .run(status, status === 'approved' ? 'ready' : 'not_applicable', now(), id)
+      if (result.changes !== 1) throw new Error('Approval has already been decided')
+      this.addActivity({ agentId: approval.agentId, taskId: approval.taskId, type: `approval.${status}`, title: `${status === 'approved' ? 'Approved' : 'Denied'}: ${approval.description}`, detail: approval.target, level: status === 'approved' ? 'success' : 'warning' })
+      return this.getApproval(id)!
+    })()
+  }
+
+  claimApprovalExecution(id: string): Approval {
+    const result = this.db.prepare(`UPDATE approvals SET execution_status='executing', execution_error=NULL WHERE id=? AND status='approved' AND execution_status='ready'`).run(id)
+    if (result.changes !== 1) throw new Error('This approved action has already been claimed or executed')
+    return this.getApproval(id)!
+  }
+
+  finishApprovalExecution(id: string, error?: string): Approval {
+    const result = this.db.prepare(`UPDATE approvals SET execution_status=?, execution_error=?, executed_at=? WHERE id=? AND execution_status='executing'`)
+      .run(error ? 'failed' : 'completed', error ?? null, now(), id)
+    if (result.changes !== 1) throw new Error('Approval execution state is invalid')
+    return this.getApproval(id)!
   }
 
   addActivity(event: { agentId?: string | null; taskId?: string | null; type: string; title: string; detail?: string; level: ActivityEvent['level'] }): ActivityEvent {
@@ -204,6 +256,10 @@ export class OfficeDatabase {
     return (this.db.prepare(sql).all(...(query ? [query.replace(/['"]/g, '')] : [])) as Record<string, unknown>[]).map(mapMemory)
   }
 
+  listMemoriesForAgent(agentId: string, limit = 8): MemoryRecord[] {
+    return (this.db.prepare('SELECT * FROM memories WHERE agent_id=? ORDER BY created_at DESC LIMIT ?').all(agentId, limit) as Record<string, unknown>[]).map(mapMemory)
+  }
+
   deleteMemory(id: string): void {
     this.db.transaction(() => {
       this.db.prepare('DELETE FROM memory_search WHERE memory_id=?').run(id)
@@ -211,8 +267,8 @@ export class OfficeDatabase {
     })()
   }
 
-  listFiles(): ManagedFile[] {
-    return (this.db.prepare('SELECT * FROM managed_files ORDER BY created_at DESC').all() as Record<string, unknown>[]).map(mapFile)
+  listFiles(limit = 500): ManagedFile[] {
+    return (this.db.prepare('SELECT * FROM managed_files ORDER BY created_at DESC LIMIT ?').all(limit) as Record<string, unknown>[]).map(mapFile)
   }
 
   addFile(file: Omit<ManagedFile, 'id' | 'createdAt'>): ManagedFile {
@@ -230,6 +286,12 @@ export class OfficeDatabase {
       VALUES (@id,@name,@type,@baseUrl,@model,@hasCredential,@enabled)
       ON CONFLICT(id) DO UPDATE SET name=@name,type=@type,base_url=@baseUrl,model=@model,has_credential=@hasCredential,enabled=@enabled`)
       .run({ ...provider, hasCredential: provider.hasCredential ? 1 : 0, enabled: provider.enabled ? 1 : 0 })
+  }
+
+  clearProviderCredential(id: string): ProviderConfig {
+    const result = this.db.prepare('UPDATE provider_configs SET has_credential=0 WHERE id=?').run(id)
+    if (result.changes !== 1) throw new Error('Provider not found')
+    return this.listProviders().find((provider) => provider.id === id)!
   }
 
   getSetting(key: string): string | undefined {
@@ -252,7 +314,7 @@ const s = (r: Record<string, unknown>, key: string): string => String(r[key])
 const nullable = (r: Record<string, unknown>, key: string): string | null => r[key] == null ? null : String(r[key])
 const mapAgent = (r: Record<string, unknown>): Agent => ({ id:s(r,'id'),name:s(r,'name'),role:s(r,'role'),description:s(r,'description'),instructions:s(r,'instructions'),goal:s(r,'goal'),avatar:s(r,'avatar'),color:s(r,'color'),provider:s(r,'provider'),model:s(r,'model'),workspaceId:nullable(r,'workspace_id'),permissionProfile:s(r,'permission_profile') as Agent['permissionProfile'],memoryEnabled:Boolean(r.memory_enabled),status:s(r,'status') as Agent['status'],currentTaskId:nullable(r,'current_task_id'),archivedAt:nullable(r,'archived_at'),createdAt:s(r,'created_at'),updatedAt:s(r,'updated_at') })
 const mapTask = (r: Record<string, unknown>): Task => ({ id:s(r,'id'),title:s(r,'title'),objective:s(r,'objective'),assignedAgentId:nullable(r,'assigned_agent_id'),parentTaskId:nullable(r,'parent_task_id'),status:s(r,'status') as Task['status'],priority:Number(r.priority),progress:Number(r.progress),result:nullable(r,'result'),error:nullable(r,'error'),createdAt:s(r,'created_at'),startedAt:nullable(r,'started_at'),completedAt:nullable(r,'completed_at'),updatedAt:s(r,'updated_at') })
-const mapApproval = (r: Record<string, unknown>): Approval => ({ id:s(r,'id'),agentId:nullable(r,'agent_id'),taskId:nullable(r,'task_id'),actionType:s(r,'action_type'),description:s(r,'description'),target:s(r,'target'),reason:s(r,'reason'),payload:s(r,'payload'),risk:s(r,'risk') as Approval['risk'],status:s(r,'status') as Approval['status'],createdAt:s(r,'created_at'),decidedAt:nullable(r,'decided_at') })
+const mapApproval = (r: Record<string, unknown>): Approval => ({ id:s(r,'id'),agentId:nullable(r,'agent_id'),taskId:nullable(r,'task_id'),actionType:s(r,'action_type'),description:s(r,'description'),target:s(r,'target'),reason:s(r,'reason'),payload:s(r,'payload'),risk:s(r,'risk') as Approval['risk'],status:s(r,'status') as Approval['status'],executionStatus:s(r,'execution_status') as Approval['executionStatus'],executionError:nullable(r,'execution_error'),createdAt:s(r,'created_at'),decidedAt:nullable(r,'decided_at'),executedAt:nullable(r,'executed_at') })
 const mapActivity = (r: Record<string, unknown>): ActivityEvent => ({ id:s(r,'id'),agentId:nullable(r,'agent_id'),taskId:nullable(r,'task_id'),type:s(r,'type'),title:s(r,'title'),detail:s(r,'detail'),level:s(r,'level') as ActivityEvent['level'],createdAt:s(r,'created_at') })
 const mapMemory = (r: Record<string, unknown>): MemoryRecord => ({ id:s(r,'id'),agentId:nullable(r,'agent_id'),taskId:nullable(r,'task_id'),category:s(r,'category') as MemoryRecord['category'],content:s(r,'content'),createdAt:s(r,'created_at') })
 const mapFile = (r: Record<string, unknown>): ManagedFile => ({ id:s(r,'id'),name:s(r,'name'),path:s(r,'path'),mime:s(r,'mime'),size:Number(r.size),agentId:nullable(r,'agent_id'),taskId:nullable(r,'task_id'),createdAt:s(r,'created_at') })

@@ -1,5 +1,5 @@
 import { z } from 'zod'
-import { agentStatuses, permissionProfiles, riskLevels, taskStatuses } from './domain'
+import { permissionProfiles, riskLevels, taskStatuses } from './domain'
 
 export const idSchema = z.string().uuid()
 
@@ -18,7 +18,7 @@ export const agentInputSchema = z.object({
   memoryEnabled: z.boolean().default(true)
 })
 
-export const agentUpdateSchema = agentInputSchema.partial().extend({ status: z.enum(agentStatuses).optional() })
+export const agentUpdateSchema = agentInputSchema.partial()
 
 export const taskInputSchema = z.object({
   title: z.string().trim().min(1).max(200),
