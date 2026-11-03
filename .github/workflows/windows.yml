@@ -33,10 +33,14 @@ jobs:
           npm run dist:win:release 2>&1 | Tee-Object -FilePath packaging.log
           $packageExit = $LASTEXITCODE
           if ($packageExit -ne 0) {
-            Get-Content packaging.log -Tail 20 | ForEach-Object {
-              $safeLine = $_ -replace '%', '%25' -replace ':', '%3A' -replace ',', '%2C'
-              Write-Output "::error title=Packaging diagnostic::$safeLine"
+            $diagnostic = Get-Content packaging.log |
+              Select-String -Pattern 'error|fatal|failed|gyp ERR|⨯' -Context 2, 2 |
+              Out-String
+            if (-not $diagnostic.Trim()) {
+              $diagnostic = Get-Content packaging.log -Tail 40 | Out-String
             }
+            $safeDiagnostic = $diagnostic -replace '%', '%25' -replace "`r", '%0D' -replace "`n", '%0A'
+            Write-Output "::error title=Packaging diagnostic::$safeDiagnostic"
             exit $packageExit
           }
         env:
