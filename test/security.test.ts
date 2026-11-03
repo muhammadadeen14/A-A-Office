@@ -1,5 +1,5 @@
 import { afterEach, describe, expect, it } from 'vitest'
-import { mkdtempSync, mkdirSync, rmSync, symlinkSync, writeFileSync } from 'node:fs'
+import { mkdtempSync, mkdirSync, realpathSync, rmSync, symlinkSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { PathGuard } from '../src/main/security/pathGuard'
@@ -24,7 +24,7 @@ describe('security boundaries', () => {
     const nested = join(root,'Client Files','分析',...'x'.repeat(20).match(/.{1,20}/g)!)
     mkdirSync(nested,{ recursive:true }); const file = join(nested,'résumé.txt'); writeFileSync(file,'safe')
     const guard = new PathGuard([root])
-    await expect(guard.resolveExisting(file)).resolves.toBe(file)
+    await expect(guard.resolveExisting(file)).resolves.toBe(realpathSync(file))
     await expect(guard.resolveExisting('missing.txt')).rejects.toMatchObject({ code:'ENOENT' })
   })
 
