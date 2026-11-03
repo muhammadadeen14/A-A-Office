@@ -26,7 +26,18 @@ jobs:
       - run: npm run lint
       - run: npm run typecheck
       - run: npm test
-      - run: npm run dist:win:release
+      - name: Build Windows installer
+        shell: pwsh
+        run: |
+          npm run dist:win:release 2>&1 | Tee-Object -FilePath packaging.log
+          $packageExit = $LASTEXITCODE
+          if ($packageExit -ne 0) {
+            Get-Content packaging.log -Tail 20 | ForEach-Object {
+              $safeLine = $_ -replace '%', '%25' -replace ':', '%3A' -replace ',', '%2C'
+              Write-Output "::error title=Packaging diagnostic::$safeLine"
+            }
+            exit $packageExit
+          }
         env:
           npm_config_msvs_version: '2022'
       - uses: actions/upload-artifact@v4
@@ -34,3 +45,10 @@ jobs:
           name: A&A-Office-Windows-x64
           path: release/A&A-Office-Setup.exe
           if-no-files-found: error
+      - name: Upload packaging diagnostic
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: A&A-Office-Windows-diagnostic
+          path: packaging.log
+          if-no-files-found: warn
