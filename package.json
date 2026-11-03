@@ -16,7 +16,7 @@
     "test:watch": "vitest",
     "dist": "npm run build && electron-builder",
     "dist:win": "npm run build && electron-builder --win nsis --x64",
-    "dist:win:release": "npm run build && electron-builder --win nsis --x64 -c.win.signAndEditExecutable=true"
+    "dist:win:release": "npm run build && electron-builder --win nsis --x64 --publish never -c.win.signAndEditExecutable=true"
   },
   "dependencies": {
     "better-sqlite3": "13.0.3",
