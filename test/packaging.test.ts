@@ -25,6 +25,7 @@ describe('Windows clean-machine packaging', () => {
   it('has a repeatable Windows release workflow with verification and artifact upload', () => {
     const workflow = readFileSync(join(root,'.github/workflows/windows.yml'),'utf8')
     for (const command of ['actions/setup-python@v6','npm_config_msvs_version','npm ci','npm run lint','npm run typecheck','npm test','npm run dist:win:release','actions/upload-artifact@v4']) expect(workflow).toContain(command)
+    expect(manifest.scripts['dist:win:release']).toContain('--publish never')
     expect(workflow).toContain('release/A&A-Office-Setup.exe')
   })
 })
